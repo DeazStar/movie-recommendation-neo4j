@@ -1,5 +1,5 @@
 from typing import Optional
-from neo4j import GraphDatabase, Result
+from neo4j import GraphDatabase
 import os
 from dotenv import load_dotenv
 from neo4j.graph import Node
@@ -39,15 +39,19 @@ def main():
     load_data('./Data/data.cypher')
     print("Welcome to Deadstar Movies List")
     print("List of all users")
-    users = list_all_users()
-    for user_name in users:
-        print(user_name)
-    user = input("Login as (enter the name of the user): ")
-    movies = recommendation(user)
-    print(f"Top {len(movies)} Recommended movies")
-    for movie in movies:
-        print(movie)
-    close_db()
+    try:
+        users = list_all_users()
+        for user_name in users:
+            print(user_name)
+        user = input("Login as (enter the name of the user): ")
+        movies = recommendation(user)
+        print(f"Top {len(movies)} Recommended movies")
+        for movie in movies:
+            print(movie)
+    except Exception as e:
+        print(e)
+    finally:
+        close_db()
 
 def list_all_movies() -> list:
     query = "MATCH (n: Movie) RETURN n"
@@ -94,6 +98,20 @@ def recommendation(user: str) -> list:
     for record in records:
         if isinstance(record['recommended_movies'], Node):
             result.append(record['recommended_movies']['title'])
+
+    if len(result) == 0:
+        second_query = f'''MATCH (person: Person {{name: '{user}'}})-[:WATCHED]->(movie: Movie) -[:BELONGS_TO]->(genre: Genre),
+        (recommended_movies: Movie)-[:BELONGS_TO]->(genre)
+        WHERE NOT (person)-[:WATCHED]->(recommended_movies)
+        RETURN DISTINCT recommended_movies
+        ORDER BY recommended_movies.rating DESC 
+        LIMIT 5'''
+        record = run_query(second_query)
+        if record is None:
+            raise Exception("Can't execute query")
+        for record in records:
+            if isinstance(record['recommended_movies'], Node):
+                result.append(record['recommended_movies']['title'])
     return result
 
 main()
