@@ -1,3 +1,4 @@
+from typing import Optional
 from neo4j import GraphDatabase, Result
 import os
 from dotenv import load_dotenv
@@ -8,13 +9,10 @@ load_dotenv()
 global driver
 def connect_db():
     global driver
-    url = os.getenv('NEO4J_URI')
-    print(url)
     driver = GraphDatabase.driver(
             os.getenv('NEO4J_URI'),
             auth=(os.getenv('NEO4J_USERNAME'), os.getenv('NEO4J_PASSWORD'))
         )
-
     print("Neo4j Connected")
 
 def close_db():
@@ -23,62 +21,79 @@ def close_db():
         driver.close()
         print("Connection closed")
 
+def load_data(path):
+    global driver
+    if not os.path.exists(path):
+        raise ValueError(f"Dataset path '{path}' does not exist.")
+    
+    try:
+        with open(path, 'r') as file:
+            data = file.read()
+            run_query(data, write=True)
+    except Exception as e:
+        print(f"Error loading dataset")
+        print(e)
+
 def main():
-    connect_db() 
-    print("Welcome to deadstar movies list")
+    connect_db()
+    load_data('./Data/data.cypher')
+    print("Welcome to Deadstar Movies List")
     print("List of all users")
     users = list_all_users()
     for user_name in users:
         print(user_name)
-    user = input("Login as(enter the name of the user): ")
-    print(user, type(user))
-    movies = recommendaton(user)
-    print(f"Top ${len(movies)} Recommended movies")
-    for i in range(len(movies)):
-        print(movies[i])
-
+    user = input("Login as (enter the name of the user): ")
+    movies = recommendation(user)
+    print(f"Top {len(movies)} Recommended movies")
+    for movie in movies:
+        print(movie)
     close_db()
 
-def list_all_movies():
+def list_all_movies() -> list:
     query = "MATCH (n: Movie) RETURN n"
     result = run_query(query)
-    # TODO: format the result
+    if result is None:
+        raise Exception("Can't execute query")
     return result
 
-def list_all_users():
+def list_all_users() -> list:
     query = "MATCH (n: Person) RETURN n"
-    record = run_query(query)
+    records = run_query(query)
+    if records is None:
+        raise Exception("Can't execute query")
     result = []
-    for nodes in record:
-        for record in nodes.values():
-            if isinstance(record, Node):
-                name = record['name']
-                result.append(name)
+    for record in records:
+        if isinstance(record['n'], Node):
+            result.append(record['n']['name'])
     return result
 
-def run_query(query) -> list:
+def run_query(query, write=False) -> Optional[list]:
     global driver
     result = []
     with driver.session() as session:
-        result = session.run(query)
-        result_list = [records for records in result]
-        return result_list
+        if write:
+            session.run(query)
+        else:
+            result = session.run(query)
+            result = [records for records in result]
+            return result
 
-def recommendaton(user) -> list:
-    # TODO: use both collobrative and content based
-    query = f'''MATCH (person: Person {{name: '{user}'}})-[:WATCHED]->(movie: Movie),
+def recommendation(user: str) -> list:
+    query = f'''
+    MATCH (person: Person {{name: '{user}'}})-[:WATCHED]->(movie: Movie)-[:BELONGS_TO]->(genre: Genre),
     (other_users: Person)-[:WATCHED]->(movie),
-    (other_users)-[:WATCHED]->(recomended_movies: Movie) WHERE other_users <> person AND NOT (person)-[:WATCHED]->(recomended_movies)
-    RETURN DISTINCT recomended_movies
-    ORDER BY recomended_movies.rating DESC
+    (other_users)-[:WATCHED]->(recommended_movies: Movie)-[:BELONGS_TO]->(genre) 
+    WHERE other_users <> person AND NOT (person)-[:WATCHED]->(recommended_movies)
+    RETURN DISTINCT recommended_movies
+    ORDER BY recommended_movies.rating DESC
     '''
-    print(query)
-    record = run_query(query)
+    records = run_query(query)
+    if records is None:
+        raise Exception("Can't execute query")
     result = []
-    for nodes in record:
-        for record in nodes.values():
-            if isinstance(record, Node):
-                name = record['title']
-                result.append(name)
+    for record in records:
+        if isinstance(record['recommended_movies'], Node):
+            result.append(record['recommended_movies']['title'])
     return result
+
 main()
